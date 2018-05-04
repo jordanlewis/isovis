@@ -63,21 +63,22 @@ text {
 
 <script id="js">
 // Create a new directed graph
-var g = new dagreD3.graphlib.Graph({compound: true}).setGraph({});
+var g = new dagreD3.graphlib.Graph({compound: true})
+  .setGraph({rankSep: 10});
 
 // States and transitions from RFC 793
 var components = {
-  "Client":       {"description": "client", clusterLabelPos: 'top', style: 'fill: #a8ddfd', "children":
+  "CockroachDB Client":       {"description": "client", clusterLabelPos: 'top', style: 'fill: #a8ddfd', "children":
     {
       "App code":   {"description": "foo"},
-      "SQL driver": {"description": "foo"},
+      "SQL driver": {"description": "foo", "in": ["App code"], "inLabel": "SQL query"},
     }
   },
-  "CockroachDB Node": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+  "CockroachDB Node": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #8bca26', "children":
     {
       "SQL Frontend": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
         {
-          "Parser":          {"description": "foo"},
+          "Parser":          {"description": "foo", "in": ["SQL driver"], "inLabel": "pgwire messages"},
           "Type Checker":    {"description": "foo"},
           "Planner":         {"description": "foo"},
           "DistSQL Planner": {"description": "foo"},
@@ -98,13 +99,22 @@ var components = {
       },
       "KV Client": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
         {
+          "Client": {"description": "foo", "in": ["rowWriter", "kvFetcher"]},
+          "TxnCoordSender": {"in": ["Client"]},
+          "DistSender": {"in": ["TxnCoordSender"]},
+        },
+      },
+      "KV Server": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+        {
+          "Node":    {"in": ["DistSender"]},
+          "Store":   {"in": ["Node"], },
+          "Replica": {"in": ["Store"]},
         },
       },
     },
   },
 }
 
-g.setEdge("App code", "SQL driver", { label: "SQL query" })
 g.setEdge("SQL driver", "Parser", { label: "pgwire" })
 g.setEdge("Parser", "Type Checker", { label: "AST" })
 g.setEdge("Type Checker", "Planner", { label: "Typed AST" })
@@ -126,6 +136,7 @@ function makeNodes(components) {
     g.setNode(name, value);
 
     var children = value['children']
+    var parents = value['in']
     if (children != undefined) {
       delete value[children]
       makeNodes(children)
@@ -133,10 +144,18 @@ function makeNodes(components) {
         g.setParent(child, name);
       });
     }
+    if (parents != undefined) {
+      delete value['in']
+      parents.forEach(function(parent) {
+        g.setEdge(parent, name, { label: value['inLabel'] });
+      });
+    }
   });
 }
 
 makeNodes(components);
+
+
 
 // Create the renderer
 var render = new dagreD3.render();
@@ -160,8 +179,12 @@ var styleTooltip = function(name, description) {
 // Run the renderer. This is what draws the final graph.
 render(inner, g);
 
+inner.selectAll("g.cluster")
+  .attr("title", function(v) { return styleTooltip(v, g.node(v).description) })
+  .each(function(v) { $(this).tipsy({ gravity: "w", opacity: 1, html: true }); });
+
 inner.selectAll("g.node")
-  .attr("title", function(v) { console.log("hi");return styleTooltip(v, g.node(v).description) })
+  .attr("title", function(v) { return styleTooltip(v, g.node(v).description) })
   .each(function(v) { $(this).tipsy({ gravity: "w", opacity: 1, html: true }); });
 
 // Center the graph
