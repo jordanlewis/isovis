@@ -64,68 +64,76 @@ text {
 <script id="js">
 // Create a new directed graph
 var g = new dagreD3.graphlib.Graph({compound: true})
-  .setGraph({rankSep: 10});
+  .setGraph({});
 
 // States and transitions from RFC 793
 var components = {
-  "CockroachDB Client":       {"description": "client", clusterLabelPos: 'top', style: 'fill: #a8ddfd', "children":
+  "CockroachDB Client Node": {"description": "Represents a node talking to CockroachDB.",
+                             clusterLabelPos: 'top', style: 'fill: #a8ddfd',
+                             "children":
     {
-      "App code":   {"description": "foo"},
-      "SQL driver": {"description": "foo", "in": ["App code"], "inLabel": "SQL query"},
+      "App code":   {"description": "App code creates sql queries and sends them."},
+      "SQL driver": {"description": "SQL driver consumes sql queries and produces pgwire messages",
+                    "in": ["App code"], "inLabel": "SQL query"},
     }
   },
-  "CockroachDB Node": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #8bca26', "children":
+  "CockroachDB Node": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #f1ffdd', "children":
     {
+      "Executor": {"description": "The conn_executor handles incoming pgwire client connections",
+                   "in": ["SQL driver"], "inLabel": "pgwire messages"},
       "SQL Frontend": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
         {
-          "Parser":          {"description": "foo", "in": ["SQL driver"], "inLabel": "pgwire messages"},
-          "Type Checker":    {"description": "foo"},
-          "Planner":         {"description": "foo"},
-          "DistSQL Planner": {"description": "foo"},
+          "Parser":          {"description": "foo", "in": ["Executor"], "inLabel": "pgwire messages"},
+          "Type Checker":    {"description": "foo", "in": ["Parser"], "inLabel": "AST"},
+          "Planner":         {"description": "foo",
+                              "in": ["Type Checker"], "inLabel": "Typed AST",
+                              "out": ["Executor"],    "outLabel": "Rows",
+                             },
+          "DistSQL Planner": {"description": "foo",
+                              "in": ["Planner"],   "inLabel": "planNode tree",
+                              "out": ["Executor"], "outLabel": "Rows",
+                             },
         }
       },
       "SQL Execution": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
         {
-          "Local engine":      {"description": "foo"},
-          "DistSQL engine":    {"description": "foo"},
+          "Local engine":      {"description": "foo", "in": ["Executor"],
+                                "inLabel": "in: planNode tree. out: rows", },
+          "DistSQL engine":    {"description": "foo", "in": ["Executor"], "inLabel": "FlowSpec"},
+          "SQL-KV translation": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+            {
+              "rowFetcher": {"description": "foo", "in": ["DistSQL engine", "Local engine"], "inLabel": "reads" },
+              "kvFetcher": {"description": "foo", "in": ["rowFetcher"]},
+              "rowWriter": {"description": "foo", "in": ["Local engine"], "inLabel": "writes" },
+            },
+          },
         },
       },
-      "SQL-KV translation": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+      "Core": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
         {
-          "rowFetcher": {"description": "foo"},
-          "kvFetcher": {"description": "foo"},
-          "rowWriter": {"description": "foo"},
-        },
-      },
-      "KV Client": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
-        {
-          "Client": {"description": "foo", "in": ["rowWriter", "kvFetcher"]},
-          "TxnCoordSender": {"in": ["Client"]},
-          "DistSender": {"in": ["TxnCoordSender"]},
-        },
-      },
-      "KV Server": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
-        {
-          "Node":    {"in": ["DistSender"]},
-          "Store":   {"in": ["Node"], },
-          "Replica": {"in": ["Store"]},
+          "KV Client": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+            {
+              "Client": {"description": "foo", "in": ["rowWriter", "kvFetcher"]},
+              "TxnCoordSender": {"in": ["Client"]},
+              "DistSender": {"in": ["TxnCoordSender"]},
+            },
+          },
+          "KV Server": {"description": "foo", style: 'fill: #e6fec3', "children":
+            {
+              "Node":    {"in": ["DistSender"]},
+              "Store":   {"in": ["Node"], },
+              "Replica": {"in": ["Store"]},
+            },
+          },
+          "Raft": {"description": "consensus", "in": ["Replica"], "inLabel": "writes"},
+          "RocksDB": {"in": [{node: "Raft", label: "writes"}, {node: "Replica", label: "reads"}]},
         },
       },
     },
   },
 }
 
-g.setEdge("SQL driver", "Parser", { label: "pgwire" })
-g.setEdge("Parser", "Type Checker", { label: "AST" })
-g.setEdge("Type Checker", "Planner", { label: "Typed AST" })
-g.setEdge("Planner", "DistSQL Planner", { label: "planNode tree" })
-g.setEdge("Planner", "Local engine", { label: "planNode tree" })
-g.setEdge("DistSQL Planner", "DistSQL engine", { label: "FlowSpec" })
-
-g.setEdge("DistSQL engine", "rowFetcher",  { label: "reads" })
-g.setEdge("Local engine", "rowWriter",  { label: "writes" })
-g.setEdge("Local engine", "rowFetcher", { label: "reads" })
-g.setEdge("rowFetcher", "kvFetcher", { label: "rows" })
+//g.setEdge("Local engine", "Executor", { label: "rows", weight: 0.00001 })
 
 function makeNodes(components) {
   // Add components to the graph, set labels, and style
@@ -133,11 +141,14 @@ function makeNodes(components) {
     var value = components[name];
     value.label = name;
     value.rx = value.ry = 5;
+    value.width=200
     g.setNode(name, value);
 
     var children = value['children']
     var parents = value['in']
+    var backEdges = value['out']
     if (children != undefined) {
+      value['clusterLabelPos'] = 'top'
       delete value[children]
       makeNodes(children)
       Object.keys(children).forEach(function(child) {
@@ -147,7 +158,17 @@ function makeNodes(components) {
     if (parents != undefined) {
       delete value['in']
       parents.forEach(function(parent) {
-        g.setEdge(parent, name, { label: value['inLabel'] });
+        if ((typeof parent) === 'object') {
+          g.setEdge(parent['node'], name, { label: parent['label'], weight: 10});
+        } else {
+          g.setEdge(parent, name, { label: value['inLabel'], weight: 10});
+        }
+      });
+    }
+    if (backEdges != undefined) {
+      delete value['out']
+      backEdges.forEach(function(backNode) {
+        g.setEdge(backNode, name, { label: value['outLabel'], weight: 10});
       });
     }
   });
@@ -186,6 +207,8 @@ inner.selectAll("g.cluster")
 inner.selectAll("g.node")
   .attr("title", function(v) { return styleTooltip(v, g.node(v).description) })
   .each(function(v) { $(this).tipsy({ gravity: "w", opacity: 1, html: true }); });
+
+inner.selectAll("g.edgeLabel");
 
 // Center the graph
 var initialScale = 0.75;
