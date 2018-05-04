@@ -1,0 +1,176 @@
+
+<!doctype html>
+
+<meta charset="utf-8">
+<title>CockroachDB Component Diagram</title>
+
+<link rel="stylesheet" href="vis.css">
+<script src="https://d3js.org/d3.v4.min.js" charset="utf-8"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre-d3/0.6.1/dagre-d3.js"></script>
+
+<!-- Pull in JQuery dependencies -->
+<script src="https://code.jquery.com/jquery-1.9.1.min.js"></script>
+<link rel="stylesheet" href="tipsy.css">
+<script src="tipsy.js"></script>
+
+<h1>CockroachDB Component Diagram</h1>
+
+<style id="css">
+text {
+  font-weight: 300;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+}
+
+.node rect {
+  stroke: #333;
+  fill: #fff;
+}
+
+.edgePath path {
+  stroke: #333;
+  fill: #333;
+  stroke-width: 1.5px;
+}
+
+.node text {
+  pointer-events: none;
+}
+
+.cluster rect {
+    stroke: black;
+    stroke-dasharray="5,5";
+}
+
+/* This styles the title of the tooltip */
+.tipsy .name {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #60b1fc;
+  margin: 0;
+}
+
+/* This styles the body of the tooltip */
+.tipsy .description {
+  font-size: 1.2em;
+}
+</style>
+
+<svg width=960 height=600></svg>
+
+<section>
+</section>
+
+<script id="js">
+// Create a new directed graph
+var g = new dagreD3.graphlib.Graph({compound: true}).setGraph({});
+
+// States and transitions from RFC 793
+var components = {
+  "Client":       {"description": "client", clusterLabelPos: 'top', style: 'fill: #a8ddfd', "children":
+    {
+      "App code":   {"description": "foo"},
+      "SQL driver": {"description": "foo"},
+    }
+  },
+  "CockroachDB Node": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+    {
+      "SQL Frontend": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+        {
+          "Parser":          {"description": "foo"},
+          "Type Checker":    {"description": "foo"},
+          "Planner":         {"description": "foo"},
+          "DistSQL Planner": {"description": "foo"},
+        }
+      },
+      "SQL Execution": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+        {
+          "Local engine":      {"description": "foo"},
+          "DistSQL engine":    {"description": "foo"},
+        },
+      },
+      "SQL-KV translation": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+        {
+          "rowFetcher": {"description": "foo"},
+          "kvFetcher": {"description": "foo"},
+          "rowWriter": {"description": "foo"},
+        },
+      },
+      "KV Client": {"description": "foo", clusterLabelPos: 'top', style: 'fill: #e6fec3', "children":
+        {
+          "rowFetcher": {"description": "foo"},
+          "kvFetcher": {"description": "foo"},
+          "rowWriter": {"description": "foo"},
+        },
+      },
+    },
+  },
+}
+
+g.setEdge("App code", "SQL driver", { label: "SQL query" })
+g.setEdge("SQL driver", "Parser", { label: "pgwire" })
+g.setEdge("Parser", "Type Checker", { label: "AST" })
+g.setEdge("Type Checker", "Planner", { label: "Typed AST" })
+g.setEdge("Planner", "DistSQL Planner", { label: "planNode tree" })
+g.setEdge("Planner", "Local engine", { label: "planNode tree" })
+g.setEdge("DistSQL Planner", "DistSQL engine", { label: "FlowSpec" })
+
+g.setEdge("DistSQL engine", "rowFetcher",  { label: "reads" })
+g.setEdge("Local engine", "rowWriter",  { label: "writes" })
+g.setEdge("Local engine", "rowFetcher", { label: "reads" })
+g.setEdge("rowFetcher", "kvFetcher", { label: "rows" })
+
+function makeNodes(components) {
+  // Add components to the graph, set labels, and style
+  Object.keys(components).forEach(function(name) {
+    var value = components[name];
+    value.label = name;
+    value.rx = value.ry = 5;
+    g.setNode(name, value);
+
+    var children = value['children']
+    if (children != undefined) {
+      delete value[children]
+      makeNodes(children)
+      Object.keys(children).forEach(function(child) {
+        g.setParent(child, name);
+      });
+    }
+  });
+}
+
+makeNodes(components);
+
+// Create the renderer
+var render = new dagreD3.render();
+
+// Set up an SVG group so that we can translate the final graph.
+var svg = d3.select("svg"),
+    inner = svg.append("g");
+
+// Set up zoom support
+var zoom = d3.zoom()
+    .on("zoom", function() {
+      inner.attr("transform", d3.event.transform);
+    });
+svg.call(zoom);
+
+// Simple function to style the tooltip for the given node.
+var styleTooltip = function(name, description) {
+  return "<p class='name'>" + name + "</p><p class='description'>" + description + "</p>";
+};
+
+// Run the renderer. This is what draws the final graph.
+render(inner, g);
+
+inner.selectAll("g.node")
+  .attr("title", function(v) { console.log("hi");return styleTooltip(v, g.node(v).description) })
+  .each(function(v) { $(this).tipsy({ gravity: "w", opacity: 1, html: true }); });
+
+// Center the graph
+var initialScale = 0.75;
+svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20).scale(initialScale));
+
+svg.attr('height', g.graph().height * initialScale + 40);
+</script>
+
